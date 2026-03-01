@@ -78,6 +78,12 @@ def parse_session_file(filepath: Path) -> dict:
                             elif isinstance(content, str):
                                 text = content[:100]
                             
+                            # Clean up metadata prefix from preview
+                            if "```" in text:
+                                parts = text.split("```")
+                                if len(parts) >= 3:
+                                    text = parts[-1].strip()[:100]
+                            
                             last_user_msg = {
                                 "timestamp": timestamp,
                                 "preview": text,
@@ -88,25 +94,30 @@ def parse_session_file(filepath: Path) -> dict:
                                 "type": "user",
                                 "model": current_model,
                             })
-                    
-                    elif entry_type == "assistant_response":
-                        session_data["assistant_messages"] += 1
-                        session_data["models"][current_model] += 1
-                        session_data["end_time"] = timestamp
                         
-                        session_data["messages"].append({
-                            "timestamp": timestamp,
-                            "type": "assistant", 
-                            "model": current_model,
-                        })
-                        
-                        if last_user_msg:
-                            session_data["conversations"].append({
-                                "timestamp": last_user_msg["timestamp"],
-                                "preview": last_user_msg["preview"],
+                        elif role == "assistant":
+                            # Get model from message if available
+                            msg_model = msg.get("model", current_model)
+                            if msg_model:
+                                current_model = msg_model
+                            
+                            session_data["assistant_messages"] += 1
+                            session_data["models"][current_model] += 1
+                            session_data["end_time"] = timestamp
+                            
+                            session_data["messages"].append({
+                                "timestamp": timestamp,
+                                "type": "assistant", 
                                 "model": current_model,
                             })
-                            last_user_msg = None
+                            
+                            if last_user_msg:
+                                session_data["conversations"].append({
+                                    "timestamp": last_user_msg["timestamp"],
+                                    "preview": last_user_msg["preview"],
+                                    "model": current_model,
+                                })
+                                last_user_msg = None
                         
                 except json.JSONDecodeError:
                     continue
