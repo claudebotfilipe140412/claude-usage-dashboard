@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Usage Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .glow {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen text-white">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-4xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+                    🦈 Claude Usage Dashboard
+                </h1>
+                <p class="text-gray-400 mt-2">OpenClaw Local Usage Tracking</p>
+            </div>
+            <div class="text-right">
+                <p class="text-gray-400 text-sm">Last updated</p>
+                <p class="text-white font-mono">{{ now }}</p>
+                <button onclick="location.reload()" class="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm transition">
+                    🔄 Refresh
+                </button>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="card rounded-xl p-6 glow">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Total Cost</p>
+                        <p class="text-3xl font-bold text-green-400">${{ "%.4f"|format(usage.total.cost) }}</p>
+                    </div>
+                    <div class="text-4xl">💰</div>
+                </div>
+            </div>
+            
+            <div class="card rounded-xl p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Total Tokens</p>
+                        <p class="text-3xl font-bold text-blue-400">{{ "{:,}".format(usage.total.total_tokens) }}</p>
+                    </div>
+                    <div class="text-4xl">🔢</div>
+                </div>
+            </div>
+            
+            <div class="card rounded-xl p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Input Tokens</p>
+                        <p class="text-3xl font-bold text-purple-400">{{ "{:,}".format(usage.total.input_tokens) }}</p>
+                    </div>
+                    <div class="text-4xl">📥</div>
+                </div>
+            </div>
+            
+            <div class="card rounded-xl p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Output Tokens</p>
+                        <p class="text-3xl font-bold text-pink-400">{{ "{:,}".format(usage.total.output_tokens) }}</p>
+                    </div>
+                    <div class="text-4xl">📤</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cache Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="card rounded-xl p-6">
+                <h3 class="text-xl font-semibold mb-4 text-indigo-300">📦 Cache Statistics</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-gray-400 text-sm">Cache Read</p>
+                        <p class="text-2xl font-bold text-cyan-400">{{ "{:,}".format(usage.total.cache_read) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400 text-sm">Cache Write</p>
+                        <p class="text-2xl font-bold text-orange-400">{{ "{:,}".format(usage.total.cache_write) }}</p>
+                    </div>
+                </div>
+                {% if usage.total.cache_read > 0 %}
+                <div class="mt-4">
+                    <p class="text-gray-400 text-sm">Cache Hit Ratio</p>
+                    <div class="w-full bg-gray-700 rounded-full h-4 mt-2">
+                        {% set cache_ratio = (usage.total.cache_read / (usage.total.cache_read + usage.total.cache_write + 0.001) * 100)|int %}
+                        <div class="bg-gradient-to-r from-cyan-500 to-blue-500 h-4 rounded-full" style="width: {{ cache_ratio }}%"></div>
+                    </div>
+                    <p class="text-right text-sm text-gray-400 mt-1">{{ cache_ratio }}%</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Models Breakdown -->
+            <div class="card rounded-xl p-6">
+                <h3 class="text-xl font-semibold mb-4 text-indigo-300">🤖 Models Used</h3>
+                <div class="space-y-3">
+                    {% for model, data in usage.models.items() %}
+                    <div class="flex justify-between items-center p-3 bg-white/5 rounded-lg">
+                        <div>
+                            <p class="font-medium">{{ model }}</p>
+                            <p class="text-sm text-gray-400">{{ data.calls }} calls</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-green-400 font-mono">${{ "%.4f"|format(data.cost) }}</p>
+                            <p class="text-sm text-gray-400">{{ "{:,}".format(data.tokens) }} tokens</p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="text-gray-500">No model data yet</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Daily Usage Chart -->
+        {% if usage.daily %}
+        <div class="card rounded-xl p-6 mb-8">
+            <h3 class="text-xl font-semibold mb-4 text-indigo-300">📊 Daily Usage</h3>
+            <canvas id="dailyChart" height="100"></canvas>
+        </div>
+        {% endif %}
+
+        <!-- Sessions Table -->
+        <div class="card rounded-xl p-6">
+            <h3 class="text-xl font-semibold mb-4 text-indigo-300">📋 Sessions</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="text-left text-gray-400 border-b border-gray-700">
+                            <th class="pb-3 px-2">Session ID</th>
+                            <th class="pb-3 px-2">Started</th>
+                            <th class="pb-3 px-2">Messages</th>
+                            <th class="pb-3 px-2">Tokens</th>
+                            <th class="pb-3 px-2">Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for session in usage.sessions %}
+                        <tr class="border-b border-gray-800 hover:bg-white/5">
+                            <td class="py-3 px-2 font-mono text-sm">{{ session.id }}...</td>
+                            <td class="py-3 px-2 text-sm">{{ session.start_time[:16] if session.start_time else 'N/A' }}</td>
+                            <td class="py-3 px-2">{{ session.messages }}</td>
+                            <td class="py-3 px-2">{{ "{:,}".format(session.tokens) }}</td>
+                            <td class="py-3 px-2 text-green-400 font-mono">${{ "%.4f"|format(session.cost) }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="py-4 text-center text-gray-500">No sessions found</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center mt-8 text-gray-500 text-sm">
+            <p>Tracking usage from ~/.openclaw/agents/main/sessions/</p>
+            <p class="mt-1">Built with FastAPI 🦈</p>
+        </div>
+    </div>
+
+    {% if usage.daily %}
+    <script>
+        const ctx = document.getElementById('dailyChart').getContext('2d');
+        const dailyData = {{ usage.daily | tojson }};
+        
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(dailyData),
+                datasets: [{
+                    label: 'Cost ($)',
+                    data: Object.values(dailyData).map(d => d.cost),
+                    backgroundColor: 'rgba(99, 102, 241, 0.5)',
+                    borderColor: 'rgba(99, 102, 241, 1)',
+                    borderWidth: 1,
+                    yAxisID: 'y'
+                }, {
+                    label: 'Requests',
+                    data: Object.values(dailyData).map(d => d.requests),
+                    backgroundColor: 'rgba(236, 72, 153, 0.5)',
+                    borderColor: 'rgba(236, 72, 153, 1)',
+                    borderWidth: 1,
+                    type: 'line',
+                    yAxisID: 'y1'
+                }]
+            },
+            options: {
+                responsive: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        grid: { color: 'rgba(255,255,255,0.1)' },
+                        ticks: { color: 'rgba(255,255,255,0.7)' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: 'rgba(255,255,255,0.7)' }
+                    },
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.1)' },
+                        ticks: { color: 'rgba(255,255,255,0.7)' }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: 'rgba(255,255,255,0.7)' }
+                    }
+                }
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>
