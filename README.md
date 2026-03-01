@@ -36,10 +36,10 @@ pip install -r requirements.txt
 python main.py
 
 # Or with uvicorn directly
-uvicorn main:app --host 0.0.0.0 --port 500
+uvicorn main:app --host 0.0.0.0 --port 5000
 ```
 
-Then open http://localhost:500 in your browser.
+Then open http://localhost:5000 in your browser.
 
 ## API Endpoints
 
