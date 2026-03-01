@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Usage Dashboard</title>
+    <title>Claude Pro Usage Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -18,6 +18,15 @@
         .glow {
             box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
         }
+        .glow-warning {
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+        }
+        .glow-danger {
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+        }
+        .progress-bar {
+            transition: width 0.5s ease-in-out;
+        }
     </style>
 </head>
 <body class="gradient-bg min-h-screen text-white">
@@ -25,10 +34,10 @@
         <!-- Header -->
         <div class="flex justify-between items-center mb-8">
             <div>
-                <h1 class="text-4xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-                    🦈 Claude Usage Dashboard
+                <h1 class="text-4xl font-bold bg-gradient-to-r from-orange-400 to-pink-400 bg-clip-text text-transparent">
+                    🦈 Claude Pro Dashboard
                 </h1>
-                <p class="text-gray-400 mt-2">OpenClaw Local Usage Tracking</p>
+                <p class="text-gray-400 mt-2">Track your subscription usage</p>
             </div>
             <div class="text-right">
                 <p class="text-gray-400 text-sm">Last updated</p>
@@ -39,102 +48,150 @@
             </div>
         </div>
 
-        <!-- Summary Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div class="card rounded-xl p-6 glow">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-400 text-sm">Total Cost</p>
-                        <p class="text-3xl font-bold text-green-400">${{ "%.4f"|format(usage.total.cost) }}</p>
-                    </div>
-                    <div class="text-4xl">💰</div>
-                </div>
-            </div>
-            
-            <div class="card rounded-xl p-6">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-400 text-sm">Total Tokens</p>
-                        <p class="text-3xl font-bold text-blue-400">{{ "{:,}".format(usage.total.total_tokens) }}</p>
-                    </div>
-                    <div class="text-4xl">🔢</div>
-                </div>
-            </div>
-            
-            <div class="card rounded-xl p-6">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-400 text-sm">Input Tokens</p>
-                        <p class="text-3xl font-bold text-purple-400">{{ "{:,}".format(usage.total.input_tokens) }}</p>
-                    </div>
-                    <div class="text-4xl">📥</div>
-                </div>
-            </div>
-            
-            <div class="card rounded-xl p-6">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-400 text-sm">Output Tokens</p>
-                        <p class="text-3xl font-bold text-pink-400">{{ "{:,}".format(usage.total.output_tokens) }}</p>
-                    </div>
-                    <div class="text-4xl">📤</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Cache Stats -->
+        <!-- Usage Meters -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <div class="card rounded-xl p-6">
-                <h3 class="text-xl font-semibold mb-4 text-indigo-300">📦 Cache Statistics</h3>
-                <div class="grid grid-cols-2 gap-4">
+            <!-- Hourly Usage -->
+            <div class="card rounded-xl p-6 {% if data.usage_percent.hourly > 80 %}glow-danger{% elif data.usage_percent.hourly > 50 %}glow-warning{% else %}glow{% endif %}">
+                <div class="flex justify-between items-center mb-4">
                     <div>
-                        <p class="text-gray-400 text-sm">Cache Read</p>
-                        <p class="text-2xl font-bold text-cyan-400">{{ "{:,}".format(usage.total.cache_read) }}</p>
+                        <p class="text-gray-400 text-sm">Last Hour</p>
+                        <p class="text-3xl font-bold">
+                            <span class="{% if data.usage_percent.hourly > 80 %}text-red-400{% elif data.usage_percent.hourly > 50 %}text-yellow-400{% else %}text-green-400{% endif %}">
+                                {{ data.stats.hour_messages }}
+                            </span>
+                            <span class="text-gray-500 text-lg">/ {{ data.limits.messages_per_hour }}</span>
+                        </p>
                     </div>
-                    <div>
-                        <p class="text-gray-400 text-sm">Cache Write</p>
-                        <p class="text-2xl font-bold text-orange-400">{{ "{:,}".format(usage.total.cache_write) }}</p>
-                    </div>
+                    <div class="text-4xl">⏰</div>
                 </div>
-                {% if usage.total.cache_read > 0 %}
-                <div class="mt-4">
-                    <p class="text-gray-400 text-sm">Cache Hit Ratio</p>
-                    <div class="w-full bg-gray-700 rounded-full h-4 mt-2">
-                        {% set cache_ratio = (usage.total.cache_read / (usage.total.cache_read + usage.total.cache_write + 0.001) * 100)|int %}
-                        <div class="bg-gradient-to-r from-cyan-500 to-blue-500 h-4 rounded-full" style="width: {{ cache_ratio }}%"></div>
-                    </div>
-                    <p class="text-right text-sm text-gray-400 mt-1">{{ cache_ratio }}%</p>
+                <div class="w-full bg-gray-700 rounded-full h-4">
+                    <div class="h-4 rounded-full progress-bar {% if data.usage_percent.hourly > 80 %}bg-red-500{% elif data.usage_percent.hourly > 50 %}bg-yellow-500{% else %}bg-green-500{% endif %}" 
+                         style="width: {{ data.usage_percent.hourly }}%"></div>
                 </div>
-                {% endif %}
+                <p class="text-right text-sm text-gray-400 mt-2">{{ data.usage_percent.hourly }}% used</p>
             </div>
 
-            <!-- Models Breakdown -->
-            <div class="card rounded-xl p-6">
-                <h3 class="text-xl font-semibold mb-4 text-indigo-300">🤖 Models Used</h3>
-                <div class="space-y-3">
-                    {% for model, data in usage.models.items() %}
-                    <div class="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                        <div>
-                            <p class="font-medium">{{ model }}</p>
-                            <p class="text-sm text-gray-400">{{ data.calls }} calls</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-green-400 font-mono">${{ "%.4f"|format(data.cost) }}</p>
-                            <p class="text-sm text-gray-400">{{ "{:,}".format(data.tokens) }} tokens</p>
-                        </div>
+            <!-- Daily Usage -->
+            <div class="card rounded-xl p-6 {% if data.usage_percent.daily > 80 %}glow-danger{% elif data.usage_percent.daily > 50 %}glow-warning{% else %}glow{% endif %}">
+                <div class="flex justify-between items-center mb-4">
+                    <div>
+                        <p class="text-gray-400 text-sm">Today</p>
+                        <p class="text-3xl font-bold">
+                            <span class="{% if data.usage_percent.daily > 80 %}text-red-400{% elif data.usage_percent.daily > 50 %}text-yellow-400{% else %}text-green-400{% endif %}">
+                                {{ data.stats.today_messages }}
+                            </span>
+                            <span class="text-gray-500 text-lg">/ {{ data.limits.messages_per_day }}</span>
+                        </p>
                     </div>
-                    {% else %}
-                    <p class="text-gray-500">No model data yet</p>
-                    {% endfor %}
+                    <div class="text-4xl">📅</div>
+                </div>
+                <div class="w-full bg-gray-700 rounded-full h-4">
+                    <div class="h-4 rounded-full progress-bar {% if data.usage_percent.daily > 80 %}bg-red-500{% elif data.usage_percent.daily > 50 %}bg-yellow-500{% else %}bg-green-500{% endif %}" 
+                         style="width: {{ data.usage_percent.daily }}%"></div>
+                </div>
+                <p class="text-right text-sm text-gray-400 mt-2">{{ data.usage_percent.daily }}% used</p>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="card rounded-xl p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Total Conversations</p>
+                        <p class="text-3xl font-bold text-purple-400">{{ "{:,}".format(data.stats.total_conversations) }}</p>
+                    </div>
+                    <div class="text-4xl">💬</div>
+                </div>
+            </div>
+            
+            <div class="card rounded-xl p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Your Messages</p>
+                        <p class="text-3xl font-bold text-blue-400">{{ "{:,}".format(data.stats.total_user_messages) }}</p>
+                    </div>
+                    <div class="text-4xl">👤</div>
+                </div>
+            </div>
+            
+            <div class="card rounded-xl p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Claude Responses</p>
+                        <p class="text-3xl font-bold text-pink-400">{{ "{:,}".format(data.stats.total_assistant_messages) }}</p>
+                    </div>
+                    <div class="text-4xl">🤖</div>
+                </div>
+            </div>
+            
+            <div class="card rounded-xl p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Sessions</p>
+                        <p class="text-3xl font-bold text-cyan-400">{{ data.stats.sessions|length }}</p>
+                    </div>
+                    <div class="text-4xl">📋</div>
                 </div>
             </div>
         </div>
 
-        <!-- Daily Usage Chart -->
-        {% if usage.daily %}
+        <!-- Charts Row -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- Today's Hourly Usage -->
+            {% if data.stats.hourly_today %}
+            <div class="card rounded-xl p-6">
+                <h3 class="text-xl font-semibold mb-4 text-indigo-300">📊 Today's Activity (by hour)</h3>
+                <canvas id="hourlyChart" height="200"></canvas>
+            </div>
+            {% endif %}
+
+            <!-- Daily Usage -->
+            {% if data.stats.daily %}
+            <div class="card rounded-xl p-6">
+                <h3 class="text-xl font-semibold mb-4 text-indigo-300">📈 Daily Usage</h3>
+                <canvas id="dailyChart" height="200"></canvas>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Models Used -->
+        {% if data.stats.models %}
         <div class="card rounded-xl p-6 mb-8">
-            <h3 class="text-xl font-semibold mb-4 text-indigo-300">📊 Daily Usage</h3>
-            <canvas id="dailyChart" height="100"></canvas>
+            <h3 class="text-xl font-semibold mb-4 text-indigo-300">🤖 Models Used</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {% for model, count in data.stats.models.items() %}
+                <div class="flex justify-between items-center p-4 bg-white/5 rounded-lg">
+                    <div>
+                        <p class="font-medium">{{ model }}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-2xl font-bold text-indigo-400">{{ count }}</p>
+                        <p class="text-sm text-gray-400">responses</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Recent Conversations -->
+        {% if data.stats.recent_conversations %}
+        <div class="card rounded-xl p-6 mb-8">
+            <h3 class="text-xl font-semibold mb-4 text-indigo-300">💬 Recent Conversations</h3>
+            <div class="space-y-3">
+                {% for conv in data.stats.recent_conversations[:10] %}
+                <div class="flex justify-between items-center p-3 bg-white/5 rounded-lg hover:bg-white/10 transition">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm text-gray-300 truncate">{{ conv.preview }}{% if conv.preview|length >= 100 %}...{% endif %}</p>
+                        <p class="text-xs text-gray-500 mt-1">{{ conv.model }}</p>
+                    </div>
+                    <div class="text-right ml-4">
+                        <p class="text-xs text-gray-400 font-mono">{{ conv.timestamp[:16] if conv.timestamp else 'N/A' }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
         </div>
         {% endif %}
 
@@ -147,19 +204,19 @@
                         <tr class="text-left text-gray-400 border-b border-gray-700">
                             <th class="pb-3 px-2">Session ID</th>
                             <th class="pb-3 px-2">Started</th>
-                            <th class="pb-3 px-2">Messages</th>
-                            <th class="pb-3 px-2">Tokens</th>
-                            <th class="pb-3 px-2">Cost</th>
+                            <th class="pb-3 px-2">Last Activity</th>
+                            <th class="pb-3 px-2">Your Messages</th>
+                            <th class="pb-3 px-2">Claude Responses</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for session in usage.sessions %}
+                        {% for session in data.stats.sessions %}
                         <tr class="border-b border-gray-800 hover:bg-white/5">
                             <td class="py-3 px-2 font-mono text-sm">{{ session.id }}...</td>
                             <td class="py-3 px-2 text-sm">{{ session.start_time[:16] if session.start_time else 'N/A' }}</td>
-                            <td class="py-3 px-2">{{ session.messages }}</td>
-                            <td class="py-3 px-2">{{ "{:,}".format(session.tokens) }}</td>
-                            <td class="py-3 px-2 text-green-400 font-mono">${{ "%.4f"|format(session.cost) }}</td>
+                            <td class="py-3 px-2 text-sm">{{ session.end_time[:16] if session.end_time else 'N/A' }}</td>
+                            <td class="py-3 px-2 text-blue-400">{{ session.user_messages }}</td>
+                            <td class="py-3 px-2 text-pink-400">{{ session.assistant_messages }}</td>
                         </tr>
                         {% else %}
                         <tr>
@@ -173,56 +230,79 @@
 
         <!-- Footer -->
         <div class="text-center mt-8 text-gray-500 text-sm">
-            <p>Tracking usage from ~/.openclaw/agents/main/sessions/</p>
-            <p class="mt-1">Built with FastAPI 🦈</p>
+            <p>Tracking local conversations from OpenClaw</p>
+            <p class="mt-1">Limits are approximate — Anthropic doesn't publish exact numbers</p>
+            <p class="mt-2">Built with FastAPI 🦈</p>
         </div>
     </div>
 
-    {% if usage.daily %}
     <script>
-        const ctx = document.getElementById('dailyChart').getContext('2d');
-        const dailyData = {{ usage.daily | tojson }};
+        {% if data.stats.hourly_today %}
+        // Hourly chart for today
+        const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
+        const hourlyData = {{ data.stats.hourly_today | tojson }};
         
-        new Chart(ctx, {
+        // Fill in missing hours
+        const hours = Array.from({length: 24}, (_, i) => i);
+        const hourlyValues = hours.map(h => hourlyData[h] || 0);
+        
+        new Chart(hourlyCtx, {
             type: 'bar',
             data: {
-                labels: Object.keys(dailyData),
+                labels: hours.map(h => `${h}:00`),
                 datasets: [{
-                    label: 'Cost ($)',
-                    data: Object.values(dailyData).map(d => d.cost),
+                    label: 'Messages',
+                    data: hourlyValues,
                     backgroundColor: 'rgba(99, 102, 241, 0.5)',
                     borderColor: 'rgba(99, 102, 241, 1)',
                     borderWidth: 1,
-                    yAxisID: 'y'
-                }, {
-                    label: 'Requests',
-                    data: Object.values(dailyData).map(d => d.requests),
-                    backgroundColor: 'rgba(236, 72, 153, 0.5)',
-                    borderColor: 'rgba(236, 72, 153, 1)',
-                    borderWidth: 1,
-                    type: 'line',
-                    yAxisID: 'y1'
                 }]
             },
             options: {
                 responsive: true,
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
-                },
                 scales: {
                     y: {
-                        type: 'linear',
-                        display: true,
-                        position: 'left',
+                        beginAtZero: true,
                         grid: { color: 'rgba(255,255,255,0.1)' },
                         ticks: { color: 'rgba(255,255,255,0.7)' }
                     },
-                    y1: {
-                        type: 'linear',
-                        display: true,
-                        position: 'right',
-                        grid: { drawOnChartArea: false },
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.1)' },
+                        ticks: { color: 'rgba(255,255,255,0.7)', maxRotation: 45 }
+                    }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+        {% endif %}
+
+        {% if data.stats.daily %}
+        // Daily chart
+        const dailyCtx = document.getElementById('dailyChart').getContext('2d');
+        const dailyData = {{ data.stats.daily | tojson }};
+        
+        new Chart(dailyCtx, {
+            type: 'line',
+            data: {
+                labels: Object.keys(dailyData),
+                datasets: [{
+                    label: 'Messages',
+                    data: Object.values(dailyData).map(d => d.messages),
+                    backgroundColor: 'rgba(236, 72, 153, 0.2)',
+                    borderColor: 'rgba(236, 72, 153, 1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: 'rgba(255,255,255,0.1)' },
                         ticks: { color: 'rgba(255,255,255,0.7)' }
                     },
                     x: {
@@ -231,13 +311,11 @@
                     }
                 },
                 plugins: {
-                    legend: {
-                        labels: { color: 'rgba(255,255,255,0.7)' }
-                    }
+                    legend: { display: false }
                 }
             }
         });
+        {% endif %}
     </script>
-    {% endif %}
 </body>
 </html>

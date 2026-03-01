@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Claude Usage Dashboard - FastAPI app to track OpenClaw/Claude usage
+Claude Pro Usage Dashboard - Track your Claude Pro subscription usage locally
 """
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
 from typing import Optional
@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-app = FastAPI(title="Claude Usage Dashboard")
+app = FastAPI(title="Claude Pro Usage Dashboard")
 
 # Setup templates
 templates_dir = Path(__file__).parent / "templates"
@@ -24,26 +24,28 @@ templates = Jinja2Templates(directory=str(templates_dir))
 # OpenClaw sessions directory
 OPENCLAW_SESSIONS_DIR = Path.home() / ".openclaw" / "agents" / "main" / "sessions"
 
+# Claude Pro limits (approximate - Anthropic doesn't publish exact numbers)
+CLAUDE_PRO_LIMITS = {
+    "messages_per_day": 100,  # Approximate daily limit
+    "messages_per_hour": 25,  # Approximate hourly limit
+}
+
 
 def parse_session_file(filepath: Path) -> dict:
-    """Parse a session JSONL file and extract usage data."""
+    """Parse a session JSONL file and extract conversation data."""
     session_data = {
         "id": None,
         "start_time": None,
-        "messages": 0,
-        "usage": {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cache_read": 0,
-            "cache_write": 0,
-            "total_tokens": 0,
-            "cost": 0.0,
-        },
-        "models": defaultdict(lambda: {"calls": 0, "tokens": 0, "cost": 0.0}),
-        "requests": [],
+        "end_time": None,
+        "user_messages": 0,
+        "assistant_messages": 0,
+        "models": defaultdict(int),
+        "messages": [],  # Individual message timestamps
+        "conversations": [],  # Message pairs
     }
     
-    current_model = "unknown"
+    current_model = "claude"
+    last_user_msg = None
     
     try:
         with open(filepath, "r") as f:
@@ -51,137 +53,188 @@ def parse_session_file(filepath: Path) -> dict:
                 try:
                     entry = json.loads(line.strip())
                     entry_type = entry.get("type")
+                    timestamp = entry.get("timestamp")
                     
                     if entry_type == "session":
                         session_data["id"] = entry.get("id")
-                        session_data["start_time"] = entry.get("timestamp")
+                        session_data["start_time"] = timestamp
                     
                     elif entry_type == "model_change":
-                        current_model = entry.get("modelId", "unknown")
+                        current_model = entry.get("modelId", "claude")
                     
                     elif entry_type == "message":
                         msg = entry.get("message", {})
-                        if msg.get("role") == "user":
-                            session_data["messages"] += 1
+                        role = msg.get("role")
+                        
+                        if role == "user":
+                            session_data["user_messages"] += 1
+                            content = msg.get("content", [])
+                            text = ""
+                            if isinstance(content, list):
+                                for c in content:
+                                    if isinstance(c, dict) and c.get("type") == "text":
+                                        text = c.get("text", "")[:100]
+                                        break
+                            elif isinstance(content, str):
+                                text = content[:100]
+                            
+                            last_user_msg = {
+                                "timestamp": timestamp,
+                                "preview": text,
+                                "model": current_model,
+                            }
+                            session_data["messages"].append({
+                                "timestamp": timestamp,
+                                "type": "user",
+                                "model": current_model,
+                            })
                     
                     elif entry_type == "assistant_response":
-                        usage = entry.get("usage", {})
-                        cost_data = usage.get("cost", {})
+                        session_data["assistant_messages"] += 1
+                        session_data["models"][current_model] += 1
+                        session_data["end_time"] = timestamp
                         
-                        input_tokens = usage.get("input", 0)
-                        output_tokens = usage.get("output", 0)
-                        cache_read = usage.get("cacheRead", 0)
-                        cache_write = usage.get("cacheWrite", 0)
-                        total = usage.get("totalTokens", 0)
-                        cost = cost_data.get("total", 0.0)
-                        
-                        session_data["usage"]["input_tokens"] += input_tokens
-                        session_data["usage"]["output_tokens"] += output_tokens
-                        session_data["usage"]["cache_read"] += cache_read
-                        session_data["usage"]["cache_write"] += cache_write
-                        session_data["usage"]["total_tokens"] += total
-                        session_data["usage"]["cost"] += cost
-                        
-                        # Track per-model usage
-                        session_data["models"][current_model]["calls"] += 1
-                        session_data["models"][current_model]["tokens"] += total
-                        session_data["models"][current_model]["cost"] += cost
-                        
-                        # Track individual requests for timeline
-                        session_data["requests"].append({
-                            "timestamp": entry.get("timestamp"),
+                        session_data["messages"].append({
+                            "timestamp": timestamp,
+                            "type": "assistant", 
                             "model": current_model,
-                            "tokens": total,
-                            "cost": cost,
                         })
+                        
+                        if last_user_msg:
+                            session_data["conversations"].append({
+                                "timestamp": last_user_msg["timestamp"],
+                                "preview": last_user_msg["preview"],
+                                "model": current_model,
+                            })
+                            last_user_msg = None
                         
                 except json.JSONDecodeError:
                     continue
     except Exception as e:
         print(f"Error parsing {filepath}: {e}")
     
-    # Convert defaultdict to regular dict
     session_data["models"] = dict(session_data["models"])
     return session_data
 
 
 def get_all_usage() -> dict:
-    """Aggregate usage from all session files."""
-    total_usage = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read": 0,
-        "cache_write": 0,
-        "total_tokens": 0,
-        "cost": 0.0,
+    """Aggregate usage from all session files for Pro subscription tracking."""
+    now = datetime.utcnow()
+    today = now.date()
+    hour_ago = now - timedelta(hours=1)
+    
+    stats = {
+        "total_conversations": 0,
+        "total_user_messages": 0,
+        "total_assistant_messages": 0,
+        "today_messages": 0,
+        "hour_messages": 0,
+        "models": defaultdict(int),
+        "daily": defaultdict(lambda: {"messages": 0, "conversations": 0}),
+        "hourly_today": defaultdict(int),
+        "sessions": [],
+        "recent_conversations": [],
     }
-    models = defaultdict(lambda: {"calls": 0, "tokens": 0, "cost": 0.0})
-    sessions = []
-    all_requests = []
-    daily_usage = defaultdict(lambda: {"tokens": 0, "cost": 0.0, "requests": 0})
     
     if not OPENCLAW_SESSIONS_DIR.exists():
         return {
-            "total": total_usage,
-            "models": {},
-            "sessions": [],
-            "daily": {},
-            "requests": [],
+            "stats": stats,
+            "limits": CLAUDE_PRO_LIMITS,
+            "usage_percent": {"daily": 0, "hourly": 0},
         }
+    
+    all_conversations = []
     
     for session_file in OPENCLAW_SESSIONS_DIR.glob("*.jsonl"):
         session_data = parse_session_file(session_file)
         
         if session_data["id"]:
-            sessions.append({
+            stats["sessions"].append({
                 "id": session_data["id"][:8],
                 "start_time": session_data["start_time"],
-                "messages": session_data["messages"],
-                "tokens": session_data["usage"]["total_tokens"],
-                "cost": session_data["usage"]["cost"],
+                "end_time": session_data["end_time"],
+                "user_messages": session_data["user_messages"],
+                "assistant_messages": session_data["assistant_messages"],
             })
         
-        # Aggregate totals
-        for key in total_usage:
-            total_usage[key] += session_data["usage"].get(key, 0)
+        stats["total_user_messages"] += session_data["user_messages"]
+        stats["total_assistant_messages"] += session_data["assistant_messages"]
+        stats["total_conversations"] += len(session_data["conversations"])
         
         # Aggregate models
-        for model, data in session_data["models"].items():
-            models[model]["calls"] += data["calls"]
-            models[model]["tokens"] += data["tokens"]
-            models[model]["cost"] += data["cost"]
+        for model, count in session_data["models"].items():
+            stats["models"][model] += count
         
-        # Aggregate requests for timeline
-        for req in session_data["requests"]:
-            all_requests.append(req)
-            if req["timestamp"]:
-                day = req["timestamp"][:10]
-                daily_usage[day]["tokens"] += req["tokens"]
-                daily_usage[day]["cost"] += req["cost"]
-                daily_usage[day]["requests"] += 1
+        # Process messages for time-based stats
+        for msg in session_data["messages"]:
+            if msg["type"] == "assistant" and msg["timestamp"]:
+                try:
+                    msg_time = datetime.fromisoformat(msg["timestamp"].replace("Z", "+00:00"))
+                    msg_date = msg_time.date()
+                    
+                    # Daily stats
+                    day_key = msg_date.isoformat()
+                    stats["daily"][day_key]["messages"] += 1
+                    
+                    # Today's messages
+                    if msg_date == today:
+                        stats["today_messages"] += 1
+                        hour_key = msg_time.hour
+                        stats["hourly_today"][hour_key] += 1
+                    
+                    # Last hour
+                    if msg_time.replace(tzinfo=None) > hour_ago:
+                        stats["hour_messages"] += 1
+                        
+                except (ValueError, TypeError):
+                    pass
+        
+        # Collect conversations
+        all_conversations.extend(session_data["conversations"])
     
-    # Sort requests by timestamp
-    all_requests.sort(key=lambda x: x["timestamp"] or "")
+    # Sort and limit recent conversations
+    all_conversations.sort(key=lambda x: x["timestamp"] or "", reverse=True)
+    stats["recent_conversations"] = all_conversations[:20]
     
-    # Sort daily usage
-    sorted_daily = dict(sorted(daily_usage.items()))
+    # Calculate daily conversations
+    for conv in all_conversations:
+        if conv["timestamp"]:
+            day_key = conv["timestamp"][:10]
+            stats["daily"][day_key]["conversations"] += 1
+    
+    # Sort daily
+    stats["daily"] = dict(sorted(stats["daily"].items()))
+    stats["hourly_today"] = dict(sorted(stats["hourly_today"].items()))
+    stats["models"] = dict(stats["models"])
+    
+    # Sort sessions
+    stats["sessions"] = sorted(
+        stats["sessions"], 
+        key=lambda x: x["start_time"] or "", 
+        reverse=True
+    )
+    
+    # Calculate usage percentages
+    daily_percent = min(100, (stats["today_messages"] / CLAUDE_PRO_LIMITS["messages_per_day"]) * 100)
+    hourly_percent = min(100, (stats["hour_messages"] / CLAUDE_PRO_LIMITS["messages_per_hour"]) * 100)
     
     return {
-        "total": total_usage,
-        "models": dict(models),
-        "sessions": sorted(sessions, key=lambda x: x["start_time"] or "", reverse=True),
-        "daily": sorted_daily,
-        "requests": all_requests[-100:],  # Last 100 requests
+        "stats": stats,
+        "limits": CLAUDE_PRO_LIMITS,
+        "usage_percent": {
+            "daily": round(daily_percent, 1),
+            "hourly": round(hourly_percent, 1),
+        },
     }
 
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """Main dashboard page."""
-    usage = get_all_usage()
+    data = get_all_usage()
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "usage": usage,
+        "data": data,
         "now": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
     })
 
@@ -196,6 +249,12 @@ async def api_usage():
 async def api_refresh():
     """Refresh and return latest usage data."""
     return get_all_usage()
+
+
+@app.get("/api/limits")
+async def api_limits():
+    """Get current limits configuration."""
+    return CLAUDE_PRO_LIMITS
 
 
 if __name__ == "__main__":
